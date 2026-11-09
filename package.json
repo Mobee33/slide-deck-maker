@@ -1,0 +1,8 @@
+{
+  "name": "slide-kit",
+  "private": true,
+  "description": "Single-file slide deck kit with shared saving on Vercel",
+  "dependencies": {
+    "@vercel/blob": "^2.0.0"
+  }
+}
