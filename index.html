@@ -1045,12 +1045,25 @@ body.sh-wait #deck{visibility:hidden}
 .shst[data-st=conflict],.shst[data-st=big],.shst[data-st=offline]{color:#e5484d}.shst[data-st=conflict]::before,.shst[data-st=big]::before,.shst[data-st=offline]::before{background:#e5484d}
 @media(max-width:1500px){.shst{font-size:0;gap:0;padding:0 6px}.shst::before{width:10px;height:10px}}
 
+/* choose slides to download */
+.dlbar{display:none;align-items:center;justify-content:space-between;gap:6px;padding:6px 10px 6px 12px;font:500 10.5px/1.25 'DM Sans',sans-serif;color:#7b8197;border-bottom:1px solid #eceff6}
+body.editing .dlbar{display:flex}
+.dlbar #dlInfo{white-space:nowrap}
+.dlbar .dlb{display:flex;gap:4px;flex:none}
+.dlbar button{border:0;background:rgba(58,98,242,.1);color:var(--blue);font:600 10.5px 'DM Sans',sans-serif;padding:3px 8px;border-radius:999px;cursor:pointer}
+.dlbar button:hover{background:rgba(58,98,242,.2)}
+.ti .tck{display:none;position:absolute;left:30px;top:12px;width:18px;height:18px;margin:0;z-index:3;cursor:pointer;accent-color:var(--blue);background:#fff;border-radius:5px}
+body.editing .ti .tck{display:block}
+.ti.picked .th{box-shadow:0 0 0 2px var(--blue)}
+.ti.picked .tn{color:var(--blue);font-weight:600}
+
 </style>
 </head>
 <body>
 
 <aside id="rail" aria-label="Slides">
   <div class="rail-head"><span class="logo"></span><span data-pname>Project Name</span></div>
+  <div class="dlbar" id="dlbar"><span id="dlInfo">Tick slides to download only some</span><span class="dlb"><button type="button" id="dlAll">All</button><button type="button" id="dlNone">None</button></span></div>
   <ol id="thumbs"></ol>
   <div class="rail-foot">
     <div class="tm-box" id="timer">
@@ -1153,7 +1166,7 @@ body.sh-wait #deck{visibility:hidden}
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const body = document.body, deck = $('#deck');
-const DECK_ID = /*DECKID*/'5e112c0dda'/*END*/;
+const DECK_ID = /*DECKID*/'9e32ccee55'/*END*/;
 const KEY = 'slidekit:' + location.pathname + ':' + DECK_ID;
 const RAILKEY = 'slidekit:rail';
 const store = {
@@ -1460,6 +1473,11 @@ function goTo(i, smooth = true) {
 
 /* ---------- thumbnails ---------- */
 let thumbT = null;
+const dlSel = new Set(); let dlLast = -1;
+function dlUpdate() {
+  const n = slides().filter(x => dlSel.has(x.id)).length, t = slides().length, el = $('#dlInfo');
+  if (el) el.textContent = n ? n + ' of ' + t + ' ticked' : 'Tick slides to download';
+}
 function scheduleThumbs() { clearTimeout(thumbT); thumbT = setTimeout(buildThumbs, 120); }
 function buildThumbs() {
   const ul = $('#thumbs'), keep = ul.scrollTop;
@@ -1468,7 +1486,9 @@ function buildThumbs() {
     const li = document.createElement('li');
     li.className = 'ti' + (i === cur ? ' cur' : '');
     li.dataset.id = s.id; li.draggable = editing;
-    li.innerHTML = '<span class="n"></span><span class="tc"><span class="th"></span><span class="tn"></span></span>';
+    li.innerHTML = '<span class="n"></span><span class="tc"><span class="th"></span><span class="tn"></span></span><input type="checkbox" class="tck" title="Include this slide when you download (Shift-click for a range)" aria-label="Include slide ' + (i + 1) + ' in download">';
+    $('.tck', li).checked = dlSel.has(s.id);
+    if (dlSel.has(s.id)) li.classList.add('picked');
     $('.n', li).textContent = i + 1;
     const nm = s.dataset.name || 'Slide'; $('.tn', li).textContent = nm; li.title = nm;
     const c = $('.canvas', s).cloneNode(true);
@@ -1479,12 +1499,22 @@ function buildThumbs() {
     $('.th', li).appendChild(c);
     ul.appendChild(li);
   });
-  ul.scrollTop = keep;
+  ul.scrollTop = keep; dlUpdate();
 }
 const thumbs = $('#thumbs');
 thumbs.addEventListener('click', e => {
-  const li = e.target.closest('.ti'); if (li) goTo($$('.ti').indexOf(li));
+  const li = e.target.closest('.ti'); if (!li) return;
+  if (e.target.closest('.tck')) {
+    const all = $$('.ti', thumbs), idx = all.indexOf(li), on = e.target.checked;
+    const set = (l, v) => { if (v) dlSel.add(l.dataset.id); else dlSel.delete(l.dataset.id); $('.tck', l).checked = v; l.classList.toggle('picked', v); };
+    if (e.shiftKey && dlLast >= 0 && dlLast !== idx) { const a = Math.min(dlLast, idx), b = Math.max(dlLast, idx); for (let k = a; k <= b; k++) set(all[k], on); } else set(li, on);
+    dlLast = idx; dlUpdate(); e.stopPropagation(); return;
+  }
+  goTo($$('.ti').indexOf(li));
 });
+function dlAll(v) { slides().forEach(x => { if (v) dlSel.add(x.id); else dlSel.delete(x.id); }); $$('.ti', thumbs).forEach(l => { $('.tck', l).checked = v; l.classList.toggle('picked', v); }); dlUpdate(); }
+$('#dlAll').addEventListener('click', () => dlAll(true));
+$('#dlNone').addEventListener('click', () => dlAll(false));
 let dragId = null;
 thumbs.addEventListener('dragstart', e => {
   const li = e.target.closest('.ti'); if (!editing || !li) { e.preventDefault(); return; }
@@ -4985,11 +5015,16 @@ function resetDeck() {
   } });
 }
 function printDeck() { deselect(); hideFmt(); closeMenus(); flush(); FX.clearAll(); toast('In the print dialog choose “Save as PDF” and turn margins off.'); setTimeout(() => window.print(), 350); }
-function exportHTML() {
+function exportHTML(only) {
   flush();
   const root = document.documentElement.cloneNode(true);
   root.querySelector('body').className = '';
   root.querySelector('#deck').innerHTML = serialize();
+  if (only && only.length) {
+    const keep = new Set(only);
+    $$('#deck .slide:not(.mslide)', root).forEach(x => { if (!keep.has(x.id)) x.remove(); });
+    $$('#deck [data-goto]', root).forEach(x => { if (!root.querySelector('#deck [id="' + x.getAttribute('data-goto') + '"]')) x.removeAttribute('data-goto'); });
+  }
   root.querySelector('#thumbs').innerHTML = '';
   $$('[data-dyn]', root).forEach(n => { n.innerHTML = ''; n.hidden = true; });
   $$('#theme', root).forEach(n => { n.innerHTML = ''; n.hidden = true; });
@@ -4999,10 +5034,14 @@ function exportHTML() {
   return '<!DOCTYPE html>\n' + root.outerHTML.replace(/\/\*DECKID\*\/'[^']*'\/\*END\*\//, "/*DECKID*/'" + uid() + uid() + "'/*END*/");
 }
 function download() {
-  const blob = new Blob([exportHTML()], { type: 'text/html' });
+  const picked = editing ? slides().filter(x => dlSel.has(x.id)).map(x => x.id) : [];
+  const some = picked.length > 0 && picked.length < slides().length;
+  const blob = new Blob([exportHTML(some ? picked : null)], { type: 'text/html' });
   const a = document.createElement('a'), slug = (pname || 'presentation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'presentation';
-  a.href = URL.createObjectURL(blob); a.download = slug + '.html'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Downloaded ' + slug + '.html');
+  const file = slug + (some ? '-selected' : '') + '.html';
+  a.href = URL.createObjectURL(blob); a.download = file; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(some ? 'Downloaded ' + picked.length + ' selected slide' + (picked.length === 1 ? '' : 's') + ' as ' + file : 'Downloaded ' + file);
 }
 
 /* ---------- floating text format bar ---------- */
